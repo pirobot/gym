@@ -90,6 +90,8 @@ class LunarLander(gym.Env, EzPickle):
 
         self.prev_reward = None
 
+        self.max_steps = 500
+
         # useful range is -1 .. +1, but spikes can be higher
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(8,), dtype=np.float32)
 
@@ -125,6 +127,8 @@ class LunarLander(gym.Env, EzPickle):
         self.world.contactListener = self.world.contactListener_keepref
         self.game_over = False
         self.prev_shaping = None
+
+        self.steps = 0
 
         W = VIEWPORT_W/SCALE
         H = VIEWPORT_H/SCALE
@@ -294,6 +298,7 @@ class LunarLander(gym.Env, EzPickle):
             ]
         assert len(state)==8
 
+        info = {}
         reward = 0
         shaping = \
             - 100*np.sqrt(state[0]*state[0] + state[1]*state[1]) \
@@ -308,13 +313,25 @@ class LunarLander(gym.Env, EzPickle):
         reward -= s_power*0.03
 
         done = False
+
         if self.game_over or abs(state[0]) >= 1.0:
             done   = True
             reward = -100
-        if not self.lander.awake:
+            info['terminal_state'] = 'crashed'
+        elif not self.lander.awake:
             done   = True
             reward = +100
-        return np.array(state, dtype=np.float32), reward, done, {}
+            info['terminal_state'] = 'success'
+        elif self.steps > self.max_steps:
+            done   = True
+            reward = 0
+            info['terminal_state'] = 'timeout'
+
+        info['steps'] = self.steps
+
+        self.steps += 1
+        
+        return np.array(state, dtype=np.float32), reward, done, info
 
     def render(self, mode='human'):
         from gym.envs.classic_control import rendering
@@ -395,22 +412,41 @@ def heuristic(env, s):
 def demo_heuristic_lander(env, seed=None, render=False):
     env.seed(seed)
     total_reward = 0
+    ave_reward = 0
     steps = 0
+    n_episodes = 0
+    n_successes = 0
+    n_crashes = 0
+    n_timeouts = 0
+    max_episodes = 100
     s = env.reset()
-    while True:
-        a = heuristic(env, s)
-        s, r, done, info = env.step(a)
-        total_reward += r
+    while n_episodes < max_episodes:
+        n_episodes += 1
 
-        if render:
-            still_open = env.render()
-            if still_open == False: break
+        while True:
+            a = heuristic(env, s)
+            s, r, done, info = env.step(a)
+            total_reward += r
 
-        if steps % 20 == 0 or done:
-            print("observations:", " ".join(["{:+0.2f}".format(x) for x in s]))
-            print("step {} total_reward {:+0.2f}".format(steps, total_reward))
-        steps += 1
-        if done: break
+            if render:
+                still_open = env.render()
+                if still_open == False: break
+
+#            if steps % 20 == 0 or done:
+#                print("observations:", " ".join(["{:+0.2f}".format(x) for x in s]))
+#                print("step {} total_reward {:+0.2f}".format(steps, total_reward))
+#                steps += 1
+            if done:
+                if info['terminal_state'] == 'success':
+                    n_successes += 1
+                elif info['terminal_state'] == 'crashed':
+                    n_crashes += 1
+                elif info['terminal_state'] == 'timeout':
+                    n_timeouts += 1
+                print("Episode:", n_episodes, "Success:", n_successes, "Crashed:", n_crashes, "Timeouts:", n_timeouts)
+                s = env.reset()                
+                break
+
     return total_reward
 
 
